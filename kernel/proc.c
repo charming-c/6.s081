@@ -44,6 +44,17 @@ procinit(void)
   kvminithart();
 }
 
+void
+copy_kernel_stack(struct proc *p)
+{
+  uint64 va = p->kstack;
+  uint64 pa = kvmpa(va);
+
+  if(mappages(p->kernel_pagetable, va, PGSIZE, pa, PTE_R | PTE_W) != 0) {
+    panic("copy_kernel_stack");
+  }
+}
+
 // Must be called with interrupts disabled,
 // to prevent race with process being moved
 // to a different CPU.
@@ -115,7 +126,9 @@ found:
 
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
-  if(p->pagetable == 0){
+  p->kernel_pagetable = copy_kernel_pagetable();
+  copy_kernel_stack(p);
+  if(p->pagetable == 0 || p->kernel_pagetable == 0){
     freeproc(p);
     release(&p->lock);
     return 0;
@@ -141,7 +154,10 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+  if(p->kernel_pagetable)
+    proc_freekernelpagetable(p->kernel_pagetable, 2);
   p->pagetable = 0;
+  p->kernel_pagetable = 0;
   p->sz = 0;
   p->pid = 0;
   p->parent = 0;
@@ -195,6 +211,22 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
   uvmfree(pagetable, sz);
 }
 
+void
+proc_freekernelpagetable(pagetable_t pagetable, int level)
+{
+  for(int i = 0; i < 512; i++) {
+    pte_t pte = pagetable[i];
+    pagetable[i] = 0;
+    if(level == 0) continue;
+
+    if(pte & PTE_V) {
+      uint64 child = PTE2PA(pte);
+      proc_freekernelpagetable((pagetable_t)child, level - 1);
+    }
+  }
+  kfree((void*)pagetable);
+}
+
 // a user program that calls exec("/init")
 // od -t xC initcode
 uchar initcode[] = {
@@ -228,6 +260,8 @@ userinit(void)
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->cwd = namei("/");
 
+  uvmptmap(p->pagetable, p->kernel_pagetable, p->sz);
+
   p->state = RUNNABLE;
 
   release(&p->lock);
@@ -242,14 +276,21 @@ growproc(int n)
   struct proc *p = myproc();
 
   sz = p->sz;
+  if(sz + n > PLIC) return -1;
+
+
   if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0 || ukvmalloc(p->pagetable, p->kernel_pagetable, p->sz, p->sz + n) == 0) {
       return -1;
     }
+    // vmprint(p->pagetable);
   } else if(n < 0){
+    ukvmdealloc(p->kernel_pagetable, sz, sz + n);
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
   p->sz = sz;
+  // uvmptmap(p->pagetable, p->kernel_pagetable, p->sz);
+  // vmprint(p->pagetable);
   return 0;
 }
 
@@ -269,6 +310,13 @@ fork(void)
 
   // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+
+  // printf("fork:\n");
+  if(uvmptmap(np->pagetable, np->kernel_pagetable, p->sz) < 0) {
     freeproc(np);
     release(&np->lock);
     return -1;
@@ -473,7 +521,10 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        w_satp(MAKE_SATP(p->kernel_pagetable));
+        sfence_vma();
         swtch(&c->context, &p->context);
+
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
@@ -483,8 +534,10 @@ scheduler(void)
       }
       release(&p->lock);
     }
+
 #if !defined (LAB_FS)
     if(found == 0) {
+      kvminithart();
       intr_on();
       asm volatile("wfi");
     }

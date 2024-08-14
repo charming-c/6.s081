@@ -70,6 +70,9 @@ exec(char *path, char **argv)
   uint64 sz1;
   if((sz1 = uvmalloc(pagetable, sz, sz + 2*PGSIZE)) == 0)
     goto bad;
+  if(sz1 >= PLIC) {
+    goto bad;
+  }
   sz = sz1;
   uvmclear(pagetable, sz-2*PGSIZE);
   sp = sz;
@@ -107,6 +110,11 @@ exec(char *path, char **argv)
     if(*s == '/')
       last = s+1;
   safestrcpy(p->name, last, sizeof(p->name));
+
+  
+  uvmunmap(p->kernel_pagetable, 0, PGROUNDUP(oldsz) / PGSIZE, 0);
+  if(uvmptmap(pagetable, p->kernel_pagetable, sz) < 0)
+    goto bad;
     
   // Commit to the user image.
   oldpagetable = p->pagetable;
@@ -116,11 +124,17 @@ exec(char *path, char **argv)
   p->trapframe->sp = sp; // initial stack pointer
   proc_freepagetable(oldpagetable, oldsz);
 
+
+  if(p->pid==1) 
+    vmprint(p->pagetable);
+
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
  bad:
   if(pagetable)
     proc_freepagetable(pagetable, sz);
+  // if(p->kernel_pagetable)
+  //   proc_freekernelpagetable(p->kernel_pagetable, 2);
   if(ip){
     iunlockput(ip);
     end_op();
