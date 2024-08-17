@@ -1,0 +1,61 @@
+1. Which registers contain arguments to functions? For example, which register holds 13 in main's call to printf?
+    
+    依据 RISC-V 标准，为函数传递参数时，参数会写入 a0-a7 寄存器组，如果有多于 8 个参数，则将参数保存在栈中
+
+2. Where is the call to function f in the assembly code for main? Where is the call to g? (Hint: the compiler may inline functions.)
+
+    在 call.asm 中，汇编指令中没有 call 调用 f，也没有 f 调用 g 的指令，我猜测是因为编译器优化了，在本该调用 f 的时候，
+    汇编直接变成 加载一个立即数到 a1，f 中也是直接使用了 g 的汇编代码，而没有使用 jalr 指令。
+
+3. At what address is the function printf located?
+
+    30:	00000097          	auipc	ra,0x0
+    34:	600080e7          	jalr	1536(ra) # 630 <printf>
+    这是调用 printf 的汇编代码，可以知道，auipc 加载当前 pc 到 ra，此时 ra 为 0x30，
+    然后 jalr 调用 ra + 1536 = 0x630，刚好：
+    0000000000000630 <printf>:
+
+    void
+    printf(const char *fmt, ...)
+    {
+    630:	711d                	addi	sp,sp,-96
+    632:	ec06                	sd	ra,24(sp)
+    ...
+
+4. What value is in the register ra just after the jalr to printf in main?
+
+    刚刚进入 printf 时，ra 就是 printf 前 pc 的地址，由于 ra 是 callee，所以在 printf 中会保存：
+    632:	ec06                	sd	ra,24(sp)
+    此时 ra 就是 0x30
+    在执行 jalr 指令之后 ra 会被设置称为返回的地址。 0x38
+
+5. Run the following code.
+
+   unsigned int i = 0x00646c72;
+   printf("H%x Wo%s", 57616, &i);
+    
+   What is the output? Here's an ASCII table that maps bytes to characters.
+   The output depends on that fact that the RISC-V is little-endian.
+   If the RISC-V were instead big-endian what would you set i to in order to yield the same output? 
+   Would you need to change 57616 to a different value?
+
+    猜测：He110 World
+    ASCII：0x72->r 0x6c->l 0x64->d
+    由于是小端法，所以低地址在前 rld
+
+    实际输出：HE110 World
+    注意 %x 的打印规则：static char digits[] = "0123456789ABCDEF"; 所以大写。
+
+6. In the following code, what is going to be printed after 'y='? (note: the answer is not a specific value.) 
+   Why does this happen?
+
+   printf("x=%d y=%d", 3);
+
+   结果是 x=3 y=1
+   我也不清楚，但是 gdb 断点打在 printint 这里，a1 发现每次都是 1。
+   看汇编是在这里:
+    │   0x4f4 <vprintf+190>     li      a3,1                                                   │
+    │   0x4f6 <vprintf+192>     li      a2,10                                                  │
+    │   0x4f8 <vprintf+194>     lw      a1,0(s6)                                               │
+    │  >0x4fc <vprintf+198>     mv      a0,s5                                                  |
+    刚好 s6 里面存储的就是 1。暂时不会解释。

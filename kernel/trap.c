@@ -77,8 +77,24 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
-    yield();
+  if(which_dev == 2) {
+    // 查看当前运行进程是否设置 alarm，并且判断是否 handler
+    if(p->tick > 0) {
+      // printf("一次 tick!\n");
+      p->total_tick += 1;
+      int t_tick = p->total_tick;
+      if(t_tick == p->tick && p->isalarmrunning == 0) {
+        p->isalarmrunning = 1;
+        copy_trapframe(p->tick_trapframe, p->trapframe);
+        p->trapframe->epc = p->alarm_handler;
+        p->total_tick = p->total_tick % p->tick;
+
+      }
+      usertrapret();
+    }
+    // 放弃 CPU
+   else yield();
+  }
 
   usertrapret();
 }

@@ -132,3 +132,38 @@ printfinit(void)
   initlock(&pr.lock, "pr");
   pr.locking = 1;
 }
+
+void
+backtrace2(uint64 *fp, uint64 stack_base)
+{
+  if((uint64)fp >= stack_base) return;
+  printf("%p\n", *(fp - 1));
+  fp = (uint64 *)*(fp - 2);
+  backtrace2(fp, stack_base);
+}
+
+void
+backtrace()
+{
+  // s0 写入的是 栈帧地址！！！
+  // 这里用指针表示地址
+  uint64 *fp = (uint64 *)r_fp();
+  // 计算栈底
+  uint64 stackbase = PGROUNDUP((uint64)fp);
+  printf("backtrace:\n");
+  
+  // for(;;) {
+  //   if((uint64)fp >= stackbase) break;
+
+  //   // fp 是一个栈帧的开始的地址
+  //   // 那么 ret 为 fp - 1 (这里为什么 -1，因为一个 uint64 长度刚好是 8 bytes)
+  //   uint64 *ret = fp - 1;
+  //   // 注意这里是 ret 的栈地址，真正的返回地址应该是 ret 地址处的内容
+  //   printf("%p\n", *ret);
+  //   // 这些就知道上一层栈的开始位置存储在 fp - 2
+  //   // 下面把 fp - 2 的内容拿出来，然后转化为地址
+  //   uint64 back = *(fp - 2);
+  //   fp = (uint64 *) back;
+  // }
+  backtrace2(fp, stackbase);
+}
