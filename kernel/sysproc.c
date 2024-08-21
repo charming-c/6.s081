@@ -47,8 +47,18 @@ sys_sbrk(void)
   if(argint(0, &n) < 0)
     return -1;
   addr = myproc()->sz;
-  if(growproc(n) < 0)
-    return -1;
+  if (n >= 0)
+    myproc()->sz = myproc()->sz + n > MAXVA ? MAXVA : myproc()->sz + n;
+  if(n < 0) {
+    // 将 sz 控制在 > 0 的范围
+    if(addr < n * (-1))
+      n = addr * (-1);
+    // printf("addr: %d, n: %d\n", addr, n);
+    if(growproc(n) < 0)
+      return -1;
+  }
+  // if(growproc(n) < 0)
+  //   return -1;
   return addr;
 }
 

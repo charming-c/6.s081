@@ -67,7 +67,28 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } else if (r_scause() == 15 || r_scause() == 13) {
+    // 拿到一个物理内存地址
+    // page fault 的 虚拟内存地址
+    void  *pa = kalloc();
+    uint64 va = r_stval();
+    uint64 sp = p->trapframe->sp;
+    sp = PGROUNDDOWN(sp);
+
+    // 如果没有足够的物理内存，直接杀死进程
+    if(pa == 0 || PGROUNDUP(va) > p->sz || va < sp) {
+      p->killed = 1;
+    } else {
+        memset(pa, 0, PGSIZE);
+        // 将 va 和 pa 进行映射，不成功则杀死进程，同时释放 alloc 的物理内存
+        if(mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)pa, PTE_W|PTE_X|PTE_R|PTE_U) != 0) {
+          kfree(pa);
+          p->killed = 1;
+      }
+    }
+
+  }
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
