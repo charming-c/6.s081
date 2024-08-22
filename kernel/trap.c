@@ -67,7 +67,42 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } else if(r_scause() == 15 || r_scause() == 13) {
+    /**
+     * 1. 检查是不是 cow page
+     * 2. 申请新物理页
+     * 3. 拷贝物理页内容
+     * 4. 替换页表条目，映射到新的页表（可写权限）
+     * 5. 删除旧物理页
+     */
+    struct proc *p = myproc();
+    uint64 va = r_stval();
+    uint64 n_pa = (uint64)kalloc();
+    pte_t *pte = walk(p->pagetable, va, 0);
+    uint64 pa = walkaddr(p->pagetable, va);
+
+    // printf("va: %p sz: %p\n", va, n_pa);
+    if(n_pa == 0 || va > p->sz || ((*pte & PTE_RSW) != PTE_RSW) || pa == 0) {
+      if(n_pa != 0) kfree((void *)n_pa);
+      p->killed = 1;
+    }
+
+    else {
+      
+      // if(pa == 0) panic("usertrap(): va has no pa");
+      memset((void *)n_pa, 0, PGSIZE);
+      memmove((char *)n_pa, (char*)pa, PGSIZE);
+      uvmunmap(p->pagetable, PGROUNDDOWN(va), 1, 1);
+      if(mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE, n_pa, PTE_U | PTE_W | PTE_R | PTE_X) != 0) {
+        kfree((void *)n_pa);
+        p->killed = 1;
+      }
+      // printf("trap:\n");
+      // vmprint(p->pagetable);
+    }
+    
+  }
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;

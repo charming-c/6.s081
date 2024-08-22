@@ -297,6 +297,9 @@ fork(void)
 
   release(&np->lock);
 
+  // vmprint(p->pagetable);
+  // vmprint(np->pagetable);
+
   return pid;
 }
 

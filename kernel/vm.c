@@ -311,22 +311,32 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+  // char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
+    // 查找 pte 时，将 父进程的 pte 设置成不可写
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
+
+    *pte &= (~PTE_W);
+    *pte |= PTE_RSW;
+
+    // 子进程 pte 不可写，且使用相同的物理内存
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    // if((mem = kalloc()) == 0)
+    //   goto err;
+    // memmove(mem, (char*)pa, PGSIZE);
+    vmcount((void *)pa, 1);
+
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
+      // kfree(mem);
+      vmcount((void *)pa, -1);
       goto err;
     }
+    // pgcounterprint();
   }
   return 0;
 
@@ -354,13 +364,33 @@ uvmclear(pagetable_t pagetable, uint64 va)
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
-  uint64 n, va0, pa0;
+  uint64 n, va0, pa0 = 0;
+  uint64 n_pa = 0;
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
+
     if(pa0 == 0)
-      return -1;
+    return -1;
+    /**如果是 cow page
+     * 1. 申请一个新的 page
+     * 2. 将内容复制过去
+     * 3. unmap 旧页，map 新页 */ 
+    pte_t *pte = walk(pagetable, va0, 0);
+    if(*pte & PTE_RSW) {
+      n_pa = (uint64)kalloc();
+      if(n_pa == 0) panic("no memory");
+      memset((void *)n_pa, 0, PGSIZE);
+      memmove((void *)n_pa, (void *)pa0, PGSIZE);
+      uvmunmap(pagetable, va0, 1, 1);
+      if(mappages(pagetable, va0, PGSIZE, n_pa, PTE_U | PTE_W | PTE_R | PTE_X) != 0){
+        kfree((void *) n_pa);
+        panic("copyout map err");
+      } 
+      pa0 = n_pa;
+    }
+   
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
@@ -439,4 +469,37 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+void
+pteprint(pte_t pte, int level, int num)
+{
+  for(int i = 0; i<=2 - level; i++) {
+    if(i == 2 - level) printf("..%d: ", num);
+    else printf(".. ");
+  }
+  printf("pte %p pa %p\n", pte, PTE2PA(pte));
+}
+
+void
+ptprint(pagetable_t pagetable, int level)
+{
+  for(int i = 0; i < 512; i++) {
+    pte_t pte = pagetable[i];
+    if(pte & PTE_V) {
+      pteprint(pte, level, i);
+      uint64 child = PTE2PA(pte);
+      if(level != 0)
+        ptprint((pagetable_t) child, level - 1);
+    }
+  }
+}
+
+// print the pagetable info to the console
+// vm: 27(9 + 9 + 9) + 12
+void 
+vmprint(pagetable_t pagetable)
+{
+  printf("page table %p\n", pagetable);
+  ptprint(pagetable, 2);
 }
