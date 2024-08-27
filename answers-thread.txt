@@ -1,0 +1,13 @@
+问题在于链表的插入，在代码中有这样一段 insert：
+    static void 
+    insert(int key, int value, struct entry **p, struct entry *n)
+    {
+    struct entry *e = malloc(sizeof(struct entry));
+    e->key = key;
+    e->value = value;
+    e->next = n;
+    *p = e;
+    }
+如果两个线程同时执行 insert，由于传入的是同一个 n，对于 thread1 我们假设插入的是 p1，thread2 插入的是 p2，那么在同时执行这个函数，并且返回之前，
+p1->next = n && p2->next = n
+显然，必然 table[i] 只能是 p1 或者 p2，总有一个要被丢弃。
