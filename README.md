@@ -7,3 +7,5 @@ lab configuration: [here](https://pdos.csail.mit.edu/6.828/2020/tools.html)
 ### 5. lazy        --> done
 ### 6. cow         --> done
 ### 7. thread      --> done
+### 8. lock        --> done
+### 9. net         --> done
