@@ -1,6 +1,6 @@
 ## MIT 6.s081
 lab configuration: [here](https://pdos.csail.mit.edu/6.828/2020/tools.html)
-lab list:
+## Lab list
  1. utils       --> done
  2. syscall     --> done
  3. pagetable   --> done
@@ -13,11 +13,13 @@ lab list:
  10. fs          --> done
  11. mmap        --> done
 
-for solutions:
+## For solutions
+command here
 ```
 git clone git@github.com:charming-c/6.s081.git
 git checkout xxx
 ```
+## Extra
 Some notes are in the corresponding branch's README.md
 - [page table](https://github.com/charming-c/6.s081/blob/pgtbl/README.md)
 - [trap](https://github.com/charming-c/6.s081/blob/traps/README.md)
