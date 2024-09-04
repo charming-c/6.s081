@@ -385,6 +385,10 @@ bmap(struct inode *ip, uint bn)
       ip->addrs[bn] = addr = balloc(ip->dev);
     return addr;
   }
+
+  // bn > NDIRECT, two cases:
+  // 1. bn - NDIRECT < INDRECT
+  // 2. bn - NDIRECT - INDRECT < NDOUBLEINDRECT
   bn -= NDIRECT;
 
   if(bn < NINDIRECT){
@@ -397,6 +401,36 @@ bmap(struct inode *ip, uint bn)
       a[bn] = addr = balloc(ip->dev);
       log_write(bp);
     }
+    brelse(bp);
+    return addr;
+  }
+
+  bn -= NINDIRECT;
+  if(bn < NDOUBLEINDITRCE) {
+    /**
+     * 1. 先判断一级是否为空
+     * 2. 再判断二级是否为空
+     */
+
+    if((addr = ip->addrs[NDIRECT + 1]) == 0)
+      ip->addrs[NDIRECT + 1] = addr = balloc(ip->dev);
+
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+
+    if((addr = a[bn / NINDIRECT]) == 0) {
+      a[bn / NINDIRECT] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+
+    struct buf *bp2 = bread(ip->dev, addr);
+    a = (uint *)bp2->data;
+    
+    if((addr = a[bn % NINDIRECT]) == 0) {
+      a[bn % NINDIRECT] = addr = balloc(ip->dev);
+      log_write(bp2);
+    }
+    brelse(bp2);
     brelse(bp);
     return addr;
   }
@@ -430,6 +464,27 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+
+  if(ip->addrs[NDIRECT + 1]) {
+    bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
+    a = (uint *)bp->data;
+    for(j = 0; j < NINDIRECT; j++) {
+      if(a[j]) {
+        struct buf *bp2 = bread(ip->dev, a[j]);
+        uint *b = (uint *)bp2->data;
+        for(int k = 0; k < NINDIRECT; k++) {
+          if(b[k])
+            bfree(ip->dev, b[k]);
+        }
+        brelse(bp2);
+        bfree(ip->dev, a[j]);
+      }
+      
+    }
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT + 1]);
+    ip->addrs[NDIRECT + 1] = 0;
   }
 
   ip->size = 0;

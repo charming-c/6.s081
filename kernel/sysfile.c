@@ -291,6 +291,7 @@ sys_open(void)
   struct file *f;
   struct inode *ip;
   int n;
+  int depth = 0;
 
   if((n = argstr(0, path, MAXPATH)) < 0 || argint(1, &omode) < 0)
     return -1;
@@ -316,6 +317,36 @@ sys_open(void)
     }
   }
 
+  
+  // /**
+  //  * 是 symlink，并且 mode 不是 O_NOFOLLOW，则继续查找 ip
+  //  */
+  if(ip->type == T_SYMLINK && (omode & O_NOFOLLOW) == 0) {
+    while(depth < 10) {
+      if(readi(ip, 0, (uint64)path, 0, MAXPATH) < 0) {
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+      iunlockput(ip);
+      
+      if((ip = namei(path)) == 0) {
+        end_op();
+        return -1;
+      }
+      ilock(ip);
+      if(ip->type != T_SYMLINK) break;
+      depth++;
+    }
+
+    if(depth >= 10) {
+      iunlockput(ip);
+      end_op();
+      return -1;
+    }
+  }
+
+
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
     iunlockput(ip);
     end_op();
@@ -337,6 +368,7 @@ sys_open(void)
     f->type = FD_INODE;
     f->off = 0;
   }
+
   f->ip = ip;
   f->readable = !(omode & O_WRONLY);
   f->writable = (omode & O_WRONLY) || (omode & O_RDWR);
@@ -483,4 +515,28 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+uint64
+sys_symlink(void)
+{
+  struct inode *ip;
+  char target[MAXPATH], path[MAXPATH];
+  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
+    return -1;
+
+  begin_op();
+  ip = create(path, T_SYMLINK, 0, 0);
+  if(ip == 0) goto fail;
+
+  if(writei(ip, 0, (uint64)target, 0, MAXPATH) < 0)
+    goto fail;
+
+  iunlockput(ip);
+
+  end_op();
+  return 0;
+  fail:
+    end_op();
+    return -1;
 }
